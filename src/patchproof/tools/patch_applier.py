@@ -14,27 +14,30 @@ class PatchApplyResult:
 
 class PatchApplier:
     def apply(self, project_path: Path, diff_text: str) -> PatchApplyResult:
+        diff_bytes = diff_text.encode("utf-8")
         check = subprocess.run(
             ["git", "apply", "--check", "-"],
-            input=diff_text,
+            input=diff_bytes,
             cwd=project_path,
-            text=True,
             capture_output=True,
             shell=False,
         )
         if check.returncode != 0:
-            return PatchApplyResult(False, check.stdout, check.stderr)
+            return PatchApplyResult(
+                False,
+                check.stdout.decode("utf-8", errors="replace"),
+                check.stderr.decode("utf-8", errors="replace"),
+            )
 
         apply = subprocess.run(
             ["git", "apply", "-"],
-            input=diff_text,
+            input=diff_bytes,
             cwd=project_path,
-            text=True,
             capture_output=True,
             shell=False,
         )
         return PatchApplyResult(
             applied=apply.returncode == 0,
-            stdout=apply.stdout,
-            stderr=apply.stderr,
+            stdout=apply.stdout.decode("utf-8", errors="replace"),
+            stderr=apply.stderr.decode("utf-8", errors="replace"),
         )
