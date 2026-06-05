@@ -15,18 +15,20 @@ def test_orchestrator_verifies_buggy_calculator(tmp_path: Path, monkeypatch):
 
     fake_llm = FakeLLMClient(
         [
+            {"action": "search_code", "query": "return a - b", "file_path": None, "line_number": None},
+            {"action": "read_code_context", "query": None, "file_path": "calculator.py", "line_number": 2},
             {
+                "action": "final",
                 "suspected_files": ["calculator.py"],
                 "hypotheses": [
                     {
                         "description": "add uses subtraction instead of addition",
-                        "evidence": "test_add expects 5 but receives -1",
+                        "evidence": "calculator.py line 2 returns a - b",
                         "confidence": 0.95,
                     }
                 ],
                 "selected_hypothesis_index": 0,
-                "reasoning_summary": "The failing assertion points to the add function.",
-                "tool_trace": [],
+                "reasoning_summary": "The code context confirms the wrong operator.",
             },
             {
                 "unified_diff": (
@@ -58,6 +60,8 @@ def test_orchestrator_verifies_buggy_calculator(tmp_path: Path, monkeypatch):
     state = WorkflowOrchestrator(Settings(), fake_llm).run(project, ["pytest", "-q"])
 
     assert state.final_status == FinalStatus.VERIFIED
+    assert state.investigation is not None
+    assert len(state.investigation.tool_trace) == 2
     assert state.attempts[0].verification_status.value == "verified"
     assert "return a - b" in (project / "calculator.py").read_text(encoding="utf-8")
     assert (tmp_path / "report.md").exists()

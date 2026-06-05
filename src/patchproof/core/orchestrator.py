@@ -47,10 +47,16 @@ class WorkflowOrchestrator:
             state.stop_reason = "Baseline test command failed before a reproducible pytest failure was available."
             return self._write_reports(state)
 
-        repository_context = self._build_repository_context(project_path)
-        investigation = InvestigatorAgent(self.llm, self.settings).run(baseline, repository_context)
+        indexer = ProjectIndexer(project_path)
+        context_tool = CodeContextTool(project_path)
+        investigation = InvestigatorAgent(self.llm, self.settings).run_with_tools(
+            baseline=baseline,
+            indexer=indexer,
+            context_tool=context_tool,
+        )
         state.investigation = investigation
 
+        repository_context = self._build_repository_context(project_path)
         attempt = PatchAgent(self.llm).run(investigation, baseline, repository_context)
         attempt.diff_metadata = DiffParser(self.settings).parse(attempt.patch_diff)
 
