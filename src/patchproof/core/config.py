@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 
 def _env_int(name: str, default: int) -> int:
@@ -14,9 +15,9 @@ def _env_int(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Settings:
     provider: str = "openai_compatible"
-    model: str | None = None
-    base_url: str | None = None
-    api_key: str | None = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
     max_investigation_tool_calls: int = 4
     max_hypotheses: int = 3
     max_llm_calls: int = 10
