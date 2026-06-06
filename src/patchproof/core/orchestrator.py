@@ -16,7 +16,7 @@ from patchproof.core.state import (
     VerificationStatus,
 )
 from patchproof.llm.base import LLMClient
-from patchproof.reporting.json_report import write_json_report
+from patchproof.reporting.json_report import write_json_report, write_llm_trace
 from patchproof.reporting.markdown import write_markdown_report
 from patchproof.tools.code_context import CodeContextTool
 from patchproof.tools.command_runner import CommandRunner
@@ -153,6 +153,7 @@ class WorkflowOrchestrator:
         return self._write_reports(state)
 
     def _write_reports(self, state: RunState) -> RunState:
+        write_llm_trace(self.llm.call_trace, Path(".patchproof") / "llm_trace.json")
         write_markdown_report(state, Path("report.md"))
         write_json_report(state, Path("report.json"))
         return state

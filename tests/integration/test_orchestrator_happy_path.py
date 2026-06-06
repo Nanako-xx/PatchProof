@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -66,3 +67,11 @@ def test_orchestrator_verifies_buggy_calculator(tmp_path: Path, monkeypatch):
     assert "return a - b" in (project / "calculator.py").read_text(encoding="utf-8")
     assert (tmp_path / "report.md").exists()
     assert (tmp_path / "report.json").exists()
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert "llm_call_count" not in report
+    assert "llm_call_trace" not in report
+    trace = json.loads((tmp_path / ".patchproof" / "llm_trace.json").read_text(encoding="utf-8"))
+    assert trace["llm_call_count"] == 6
+    assert trace["llm_call_trace"][0]["response_model"] == "InvestigationStep"
+    assert trace["llm_call_trace"][0]["raw_responses"]
+    assert trace["llm_call_trace"][0]["call_count"] == 1

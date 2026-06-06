@@ -6,7 +6,6 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
-
 class FinalStatus(str, Enum):
     CREATED = "created"
     NOT_REPRODUCED = "not_reproduced"

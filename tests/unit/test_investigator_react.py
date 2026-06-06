@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from patchproof.agents.investigator import InvestigatorAgent
+import pytest
+from pydantic import ValidationError
+
+from patchproof.agents.investigator import InvestigationStep, InvestigatorAgent
 from patchproof.core.config import Settings
 from patchproof.core.state import TestRunResult as RunResultModel
 from patchproof.core.state import TestRunStatus as RunStatus
@@ -47,3 +50,15 @@ def test_investigator_react_uses_read_only_tools(tmp_path: Path):
 
     assert result.selected_hypothesis.evidence == "calculator.py line 2 returns a - b"
     assert len(result.tool_trace) == 2
+    assert "Every response must include an action" in client.calls[0].user_prompt
+
+
+def test_investigation_step_requires_fields_for_selected_action():
+    with pytest.raises(ValidationError):
+        InvestigationStep(action="search_code")
+
+    with pytest.raises(ValidationError):
+        InvestigationStep(action="read_code_context", file_path="calculator.py")
+
+    with pytest.raises(ValidationError):
+        InvestigationStep(action="final")
