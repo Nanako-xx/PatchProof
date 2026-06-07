@@ -48,6 +48,15 @@ def test_patch_applier_applies_safe_patch(tmp_path: Path):
     assert "return a + b" in (tmp_path / "calculator.py").read_text(encoding="utf-8")
 
 
+def test_patch_applier_normalizes_missing_final_newline(tmp_path: Path):
+    (tmp_path / "calculator.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+
+    result = PatchApplier().apply(tmp_path, SAFE_DIFF.rstrip("\n"))
+
+    assert result.applied is True
+    assert "return a + b" in (tmp_path / "calculator.py").read_text(encoding="utf-8")
+
+
 def test_patch_applier_returns_failure_without_modifying_file(tmp_path: Path):
     (tmp_path / "calculator.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
 

@@ -27,12 +27,20 @@ class PatchAgent:
         investigation: InvestigationResult,
         baseline: TestRunResult,
         code_context: str,
+        previous_patch: str = "",
+        feedback: str = "",
     ) -> AttemptResult:
         user_prompt = f"""Investigation: {investigation.model_dump()}
 Baseline summary: {baseline.summary}
 Failed tests: {baseline.failed_tests}
 Code context:
 {code_context}
+Previous patch:
+{previous_patch or "None"}
+Feedback from the previous attempt:
+{feedback or "None"}
+
+Generate a complete replacement patch against the original code context.
 """
         response = self.llm.generate_structured(
             LLMRequest(system_prompt=_SYSTEM_PROMPT, user_prompt=user_prompt),

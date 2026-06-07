@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from patchproof.core.state import FinalStatus, RunState
+from patchproof.core.state import AttemptResult, FinalStatus, RunState, VerificationStatus
 from patchproof.llm.base import LLMCallTrace
 from patchproof.reporting.json_report import write_json_report, write_llm_trace
 from patchproof.reporting.markdown import render_markdown_report, write_markdown_report
@@ -55,3 +55,29 @@ def test_write_llm_trace_to_private_debug_file(tmp_path: Path):
     payload = json.loads(trace_path.read_text(encoding="utf-8"))
     assert payload["llm_call_count"] == 1
     assert payload["llm_call_trace"][0]["response_model"] == "InvestigationStep"
+
+
+def test_markdown_report_includes_each_patch_attempt_and_failure_reason():
+    state = RunState(
+        project_path=Path("demo"),
+        test_command=["pytest", "-q"],
+        attempts=[
+            AttemptResult(
+                patch_diff="invalid diff",
+                patch_explanation="First patch.",
+                verification_status=VerificationStatus.PATCH_FAILED,
+                patch_apply_error="error: corrupt patch",
+            ),
+            AttemptResult(
+                patch_diff="valid diff",
+                patch_explanation="Second patch.",
+                verification_status=VerificationStatus.TESTS_FAILED,
+            ),
+        ],
+    )
+
+    markdown = render_markdown_report(state)
+
+    assert "invalid diff" in markdown
+    assert "error: corrupt patch" in markdown
+    assert "valid diff" in markdown

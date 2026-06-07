@@ -47,6 +47,19 @@ def render_markdown_report(state: RunState) -> str:
                     f"- Review: `{review_decision}`",
                     f"- Verification: `{attempt.verification_status.value}`",
                     f"- Explanation: {attempt.patch_explanation}",
+                    f"- Review summary: {attempt.review_summary}",
+                ]
+            )
+            if attempt.patch_apply_error:
+                lines.append(f"- Patch apply error: `{attempt.patch_apply_error.strip()}`")
+            if attempt.verification_result is not None:
+                lines.append(f"- Verification summary: {attempt.verification_result.summary}")
+            lines.extend(
+                [
+                    "",
+                    "```diff",
+                    attempt.patch_diff,
+                    "```",
                 ]
             )
     if state.coach_explanation is not None:

@@ -24,6 +24,7 @@ class Settings:
     command_timeout_seconds: int = 60
     max_patch_files: int = 3
     max_patch_changed_lines: int = 100
+    max_patch_attempts: int = 3
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -38,4 +39,5 @@ class Settings:
             command_timeout_seconds=_env_int("PATCHPROOF_COMMAND_TIMEOUT_SECONDS", 60),
             max_patch_files=_env_int("PATCHPROOF_MAX_PATCH_FILES", 3),
             max_patch_changed_lines=_env_int("PATCHPROOF_MAX_PATCH_CHANGED_LINES", 100),
+            max_patch_attempts=_env_int("PATCHPROOF_MAX_PATCH_ATTEMPTS", 3),
         )

@@ -4,6 +4,8 @@ PatchProof is a Python CLI debugging agent that proposes verified patch suggesti
 
 It reproduces a pytest failure, investigates with a bounded read-only agent, generates a unified diff, reviews it, verifies it in a temporary copy, and writes reports. The original project is not modified.
 
+PatchProof uses a bounded feedback loop. A patch application error is returned to PatchAgent so it can generate a corrected replacement patch. If the patch applies but pytest still fails, the new test evidence is returned to InvestigatorAgent before the next patch is generated. Every attempt is preserved in the reports, and the default maximum is three patch attempts.
+
 ## Quick Start
 
 Install the package in editable mode:
@@ -19,6 +21,7 @@ PATCHPROOF_PROVIDER=openai_compatible
 PATCHPROOF_MODEL=your-model-id
 PATCHPROOF_BASE_URL=https://your-provider.example.com/v1
 PATCHPROOF_API_KEY=your-api-key
+PATCHPROOF_MAX_PATCH_ATTEMPTS=3
 ```
 
 Run PatchProof against a local pytest project:
@@ -47,6 +50,7 @@ $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'; $env:PYTHONDONTWRITEBYTECODE='1'; pytho
 
 - **CLI first:** keeps the MVP focused on a developer workflow that can be tested and demoed from the terminal.
 - **Hand-written orchestrator:** the top-level flow is a fixed safety-critical state machine, so v0.1 does not need LangGraph yet.
+- **Classified retry routing:** patch-format and application failures return to PatchAgent, while new pytest failures return to InvestigatorAgent.
 - **Bounded ReAct only for investigation:** code exploration benefits from iterative read-only tool calls, while patch review and verification should stay gated.
 - **Pydantic:** validates structured LLM output before downstream steps use it.
 - **pytest:** matches the first target use case: Python projects with reproducible test failures.

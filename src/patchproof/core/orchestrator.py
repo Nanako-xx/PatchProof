@@ -8,6 +8,7 @@ from patchproof.agents.patcher import PatchAgent
 from patchproof.agents.reviewer import ReviewerAgent
 from patchproof.core.config import Settings
 from patchproof.core.state import (
+    AttemptResult,
     FinalStatus,
     ReviewDecision,
     RunState,
@@ -57,45 +58,101 @@ class WorkflowOrchestrator:
         state.investigation = investigation
 
         repository_context = self._build_repository_context(project_path)
-        attempt = PatchAgent(self.llm).run(investigation, baseline, repository_context)
-        attempt.diff_metadata = DiffParser(self.settings).parse(attempt.patch_diff)
+        evidence = baseline
+        previous_patch = ""
+        feedback = ""
 
-        review = ReviewerAgent(self.llm).run(investigation, attempt.patch_diff, attempt.diff_metadata)
-        attempt.review_decision = review.decision
-        attempt.review_summary = review.review_summary
-        attempt.semantic_risks = review.semantic_risks
-        state.attempts.append(attempt)
+        for attempt_number in range(1, self.settings.max_patch_attempts + 1):
+            attempt = PatchAgent(self.llm).run(
+                investigation,
+                evidence,
+                repository_context,
+                previous_patch=previous_patch,
+                feedback=feedback,
+            )
+            attempt.diff_metadata = DiffParser(self.settings).parse(attempt.patch_diff)
 
-        if review.decision == ReviewDecision.REJECTED:
-            state.final_status = FinalStatus.UNVERIFIED
-            state.stop_reason = "Patch was rejected before verification."
-            return self._write_reports(state)
+            review = ReviewerAgent(self.llm).run(investigation, attempt.patch_diff, attempt.diff_metadata)
+            attempt.review_decision = review.decision
+            attempt.review_summary = review.review_summary
+            attempt.semantic_risks = review.semantic_risks
 
-        with TempWorkspace(project_path) as copied_project:
-            apply_result = PatchApplier().apply(copied_project, attempt.patch_diff)
-            if not apply_result.applied:
-                attempt.verification_status = VerificationStatus.PATCH_FAILED
-                attempt.patch_apply_error = apply_result.stderr
-                state.final_status = FinalStatus.UNVERIFIED
-                state.stop_reason = "Patch failed to apply in the temporary workspace."
-                return self._write_reports(state)
+            if review.decision == ReviewDecision.REJECTED:
+                state.attempts.append(attempt)
+                previous_patch = attempt.patch_diff
+                feedback = self._review_feedback(attempt)
+                continue
 
-            verification = self._run_tests(copied_project, test_command)
-            attempt.verification_result = verification
+            with TempWorkspace(project_path) as copied_project:
+                apply_result = PatchApplier().apply(copied_project, attempt.patch_diff)
+                if not apply_result.applied:
+                    attempt.verification_status = VerificationStatus.PATCH_FAILED
+                    attempt.patch_apply_error = apply_result.stderr
+                    state.attempts.append(attempt)
+                    previous_patch = attempt.patch_diff
+                    feedback = self._patch_apply_feedback(attempt)
+                    continue
+
+                verification = self._run_tests(copied_project, test_command)
+                attempt.verification_result = verification
+
+            state.attempts.append(attempt)
             if verification.status == TestRunStatus.PASSED:
                 attempt.verification_status = VerificationStatus.VERIFIED
                 state.final_status = FinalStatus.VERIFIED
                 state.stop_reason = "Patch verified against the provided test command in a temporary copy."
-            elif verification.status == TestRunStatus.TIMEOUT:
+                break
+            if verification.status == TestRunStatus.TIMEOUT:
                 attempt.verification_status = VerificationStatus.TIMEOUT
                 state.final_status = FinalStatus.UNVERIFIED
                 state.stop_reason = "Verification timed out in the temporary workspace."
-            else:
-                attempt.verification_status = VerificationStatus.TESTS_FAILED
-                state.final_status = FinalStatus.UNVERIFIED
-                state.stop_reason = "Verification tests still failed in the temporary workspace."
+                break
+
+            attempt.verification_status = VerificationStatus.TESTS_FAILED
+            previous_patch = attempt.patch_diff
+            feedback = self._verification_feedback(attempt)
+            evidence = verification
+            if attempt_number < self.settings.max_patch_attempts:
+                investigation = InvestigatorAgent(self.llm, self.settings).run_with_tools(
+                    baseline=verification,
+                    indexer=indexer,
+                    context_tool=context_tool,
+                )
+                state.investigation = investigation
+
+        if state.final_status == FinalStatus.CREATED:
+            state.final_status = FinalStatus.UNVERIFIED
+            state.stop_reason = (
+                f"Stopped after reaching the maximum patch attempts: {self.settings.max_patch_attempts}."
+            )
 
         return self._explain_and_write(state)
+
+    def _patch_apply_feedback(self, attempt: AttemptResult) -> str:
+        return f"""The previous patch could not be applied.
+Patch application error:
+{attempt.patch_apply_error}
+Return a corrected complete replacement patch against the original code."""
+
+    def _review_feedback(self, attempt: AttemptResult) -> str:
+        risks = "\n".join(attempt.semantic_risks)
+        return f"""The previous patch was rejected.
+Review summary: {attempt.review_summary}
+Risks and rule violations:
+{risks}
+Return a corrected complete replacement patch against the original code."""
+
+    def _verification_feedback(self, attempt: AttemptResult) -> str:
+        verification = attempt.verification_result
+        if verification is None:
+            return "The previous patch did not produce a verification result."
+        return f"""The previous patch applied, but the provided pytest command still failed.
+Verification summary: {verification.summary}
+Stdout:
+{verification.stdout}
+Stderr:
+{verification.stderr}
+Return a corrected complete replacement patch against the original code."""
 
     def _run_tests(self, project_path: Path, test_command: list[str]) -> TestRunResult:
         result = CommandRunner(timeout_seconds=self.settings.command_timeout_seconds).run(

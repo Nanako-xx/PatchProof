@@ -11,6 +11,7 @@ def test_settings_defaults_are_safe():
     assert settings.command_timeout_seconds == 60
     assert settings.max_patch_files == 3
     assert settings.max_patch_changed_lines == 100
+    assert settings.max_patch_attempts == 3
 
 
 def test_settings_from_env_uses_safe_defaults(monkeypatch):
@@ -25,6 +26,7 @@ def test_settings_from_env_uses_safe_defaults(monkeypatch):
         "PATCHPROOF_COMMAND_TIMEOUT_SECONDS",
         "PATCHPROOF_MAX_PATCH_FILES",
         "PATCHPROOF_MAX_PATCH_CHANGED_LINES",
+        "PATCHPROOF_MAX_PATCH_ATTEMPTS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -40,6 +42,7 @@ def test_settings_from_env_uses_safe_defaults(monkeypatch):
     assert settings.command_timeout_seconds == 60
     assert settings.max_patch_files == 3
     assert settings.max_patch_changed_lines == 100
+    assert settings.max_patch_attempts == 3
 
 
 def test_settings_load_from_environment(monkeypatch):
@@ -47,6 +50,7 @@ def test_settings_load_from_environment(monkeypatch):
     monkeypatch.setenv("PATCHPROOF_BASE_URL", "https://api.example.com/v1")
     monkeypatch.setenv("PATCHPROOF_API_KEY", "secret-value")
     monkeypatch.setenv("PATCHPROOF_MAX_LLM_CALLS", "7")
+    monkeypatch.setenv("PATCHPROOF_MAX_PATCH_ATTEMPTS", "2")
 
     settings = Settings.from_env()
 
@@ -54,3 +58,4 @@ def test_settings_load_from_environment(monkeypatch):
     assert settings.base_url == "https://api.example.com/v1"
     assert settings.api_key == "secret-value"
     assert settings.max_llm_calls == 7
+    assert settings.max_patch_attempts == 2

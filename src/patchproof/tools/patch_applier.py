@@ -14,7 +14,10 @@ class PatchApplyResult:
 
 class PatchApplier:
     def apply(self, project_path: Path, diff_text: str) -> PatchApplyResult:
-        diff_bytes = diff_text.encode("utf-8")
+        normalized_diff = diff_text.replace("\r\n", "\n").replace("\r", "\n")
+        if normalized_diff and not normalized_diff.endswith("\n"):
+            normalized_diff += "\n"
+        diff_bytes = normalized_diff.encode("utf-8")
         check = subprocess.run(
             ["git", "apply", "--check", "-"],
             input=diff_bytes,
