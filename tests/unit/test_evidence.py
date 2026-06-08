@@ -44,6 +44,24 @@ def test_bug_evidence_builder_merges_sources_and_classifies_files():
     assert evidence.summary == "ValueError in src/parser.py"
 
 
+def test_bug_evidence_builder_classifies_absolute_windows_tests_path_as_entrypoint():
+    text = '''
+Traceback (most recent call last):
+  File "C:\\repo\\tests\\helpers.py", line 8, in test_parse
+    parse_count("x")
+  File "C:\\repo\\src\\parser.py", line 3, in parse_count
+    return int(value)
+ValueError: invalid literal for int() with base 10: 'x'
+'''
+    source = TextEvidenceReader().read("windows traceback", text)
+
+    evidence = BugEvidenceBuilder().build([source])
+
+    assert evidence.entrypoint_files == ["C:\\repo\\tests\\helpers.py"]
+    assert "C:\\repo\\tests\\helpers.py" not in evidence.suspected_files
+    assert evidence.suspected_files == ["C:\\repo\\src\\parser.py"]
+
+
 def test_bug_evidence_builder_adds_test_output_source():
     result = TestRunResult(
         status=TestRunStatus.FAILED,

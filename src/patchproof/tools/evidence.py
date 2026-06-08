@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from patchproof.core.state import (
     BugEvidence,
@@ -45,8 +45,8 @@ class LogFileEvidenceReader:
 class BugEvidenceBuilder:
     def __init__(
         self,
-        traceback_parser: TracebackParser | None = None,
-        log_parser: LogParser | None = None,
+        traceback_parser: Optional[TracebackParser] = None,
+        log_parser: Optional[LogParser] = None,
     ) -> None:
         self._traceback_parser = traceback_parser or TracebackParser()
         self._log_parser = log_parser or LogParser()
@@ -81,10 +81,10 @@ class BugEvidenceBuilder:
 def _is_entrypoint_frame(frame: TracebackFrame) -> bool:
     path = frame.file_path.replace("\\", "/")
     filename = Path(path).name
-    return path.startswith("tests/") or filename.startswith("test_") or filename.endswith("_test.py")
+    return "tests" in path.split("/") or filename.startswith("test_") or filename.endswith("_test.py")
 
 
-def _unique(values: Iterable[str | None]) -> list[str]:
+def _unique(values: Iterable[Optional[str]]) -> list[str]:
     result: list[str] = []
     for value in values:
         if value and value not in result:
@@ -92,7 +92,7 @@ def _unique(values: Iterable[str | None]) -> list[str]:
     return result
 
 
-def _summarize(exception_type: str | None, suspected_files: list[str]) -> str:
+def _summarize(exception_type: Optional[str], suspected_files: list[str]) -> str:
     if exception_type and suspected_files:
         return f"{exception_type} in {suspected_files[-1]}"
     if exception_type:
