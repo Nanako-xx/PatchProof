@@ -41,6 +41,22 @@ class OpenAICompatibleClient:
             },
             {"role": "user", "content": request.user_prompt},
         ]
+        return self._generate_structured_from_messages(
+            messages=messages,
+            request=request,
+            response_model=response_model,
+            schema=schema,
+            error_prefix="LLM provider call failed",
+        )
+
+    def _generate_structured_from_messages(
+        self,
+        messages: list[dict],
+        request: LLMRequest,
+        response_model: type[T],
+        schema: dict,
+        error_prefix: str,
+    ) -> LLMResponse:
         call_count = 0
         raw_responses: list[str] = []
         repair_records: list[LLMRepairRecord] = []
@@ -105,7 +121,7 @@ class OpenAICompatibleClient:
         except LLMProviderError:
             raise
         except Exception as exc:
-            raise LLMProviderError(f"LLM provider call failed: {exc}") from exc
+            raise LLMProviderError(f"{error_prefix}: {exc}") from exc
 
     def generate_structured_with_image(
         self,
@@ -115,6 +131,7 @@ class OpenAICompatibleClient:
     ) -> LLMResponse:
         schema = response_model.model_json_schema()
         schema_text = json.dumps(schema, indent=2, ensure_ascii=False)
+        data_url = self._image_data_url(image_path)
         messages = [
             {
                 "role": "system",
@@ -129,42 +146,17 @@ class OpenAICompatibleClient:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": request.user_prompt},
-                    {"type": "image_url", "image_url": {"url": self._image_data_url(image_path)}},
+                    {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             },
         ]
-        call_count = 0
-        raw_responses: list[str] = []
-        try:
-            content, initial_calls = self._request_content(
-                messages=messages,
-                temperature=request.temperature,
-                response_model=response_model,
-                schema=schema,
-            )
-            call_count += initial_calls
-            raw_responses.append(content)
-            data = response_model.model_validate(json.loads(content))
-            self.call_trace.append(
-                LLMCallTrace(
-                    response_model=response_model.__name__,
-                    provider="openai_compatible",
-                    model=self.model,
-                    raw_responses=raw_responses,
-                    call_count=call_count,
-                )
-            )
-            return LLMResponse(
-                data=data,
-                raw_text=content,
-                provider="openai_compatible",
-                model=self.model,
-                call_count=call_count,
-            )
-        except LLMProviderError:
-            raise
-        except Exception as exc:
-            raise LLMProviderError(f"LLM provider image call failed: {exc}") from exc
+        return self._generate_structured_from_messages(
+            messages=messages,
+            request=request,
+            response_model=response_model,
+            schema=schema,
+            error_prefix="LLM provider image call failed",
+        )
 
     def _request_content(
         self,
@@ -221,6 +213,13 @@ class OpenAICompatibleClient:
         raise LLMProviderError("LLM provider rejected all supported structured output formats.")
 
     def _image_data_url(self, image_path: Path) -> str:
-        mime_type = mimetypes.guess_type(str(image_path))[0] or "application/octet-stream"
+        mime_type = mimetypes.guess_type(str(image_path))[0]
+        if mime_type == "image/jpg":
+            mime_type = "image/jpeg"
+        if mime_type not in {"image/png", "image/jpeg"}:
+            raise LLMProviderError(
+                "Unsupported image type for bug screenshot. "
+                "Use a PNG or JPEG image, or provide text with --bug-text or --bug-log."
+            )
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         return f"data:{mime_type};base64,{encoded}"
