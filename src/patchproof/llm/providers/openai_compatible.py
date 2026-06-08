@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -18,6 +21,10 @@ class OpenAICompatibleClient:
         self.timeout_seconds = timeout_seconds
         self._json_schema_supported: Optional[bool] = None
         self.call_trace: list[LLMCallTrace] = []
+
+    @property
+    def supports_images(self) -> bool:
+        return True
 
     def generate_structured(self, request: LLMRequest, response_model: type[T]) -> LLMResponse:
         schema = response_model.model_json_schema()
@@ -100,9 +107,68 @@ class OpenAICompatibleClient:
         except Exception as exc:
             raise LLMProviderError(f"LLM provider call failed: {exc}") from exc
 
+    def generate_structured_with_image(
+        self,
+        request: LLMRequest,
+        image_path: Path,
+        response_model: type[T],
+    ) -> LLMResponse:
+        schema = response_model.model_json_schema()
+        schema_text = json.dumps(schema, indent=2, ensure_ascii=False)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{request.system_prompt}\n\n"
+                    "Return exactly one JSON object with no Markdown fences or extra text. "
+                    "The object must validate against this JSON Schema:\n"
+                    f"{schema_text}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": request.user_prompt},
+                    {"type": "image_url", "image_url": {"url": self._image_data_url(image_path)}},
+                ],
+            },
+        ]
+        call_count = 0
+        raw_responses: list[str] = []
+        try:
+            content, initial_calls = self._request_content(
+                messages=messages,
+                temperature=request.temperature,
+                response_model=response_model,
+                schema=schema,
+            )
+            call_count += initial_calls
+            raw_responses.append(content)
+            data = response_model.model_validate(json.loads(content))
+            self.call_trace.append(
+                LLMCallTrace(
+                    response_model=response_model.__name__,
+                    provider="openai_compatible",
+                    model=self.model,
+                    raw_responses=raw_responses,
+                    call_count=call_count,
+                )
+            )
+            return LLMResponse(
+                data=data,
+                raw_text=content,
+                provider="openai_compatible",
+                model=self.model,
+                call_count=call_count,
+            )
+        except LLMProviderError:
+            raise
+        except Exception as exc:
+            raise LLMProviderError(f"LLM provider image call failed: {exc}") from exc
+
     def _request_content(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict],
         temperature: float,
         response_model: type[T],
         schema: dict,
@@ -153,3 +219,8 @@ class OpenAICompatibleClient:
             return body["choices"][0]["message"]["content"], call_count
 
         raise LLMProviderError("LLM provider rejected all supported structured output formats.")
+
+    def _image_data_url(self, image_path: Path) -> str:
+        mime_type = mimetypes.guess_type(str(image_path))[0] or "application/octet-stream"
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"

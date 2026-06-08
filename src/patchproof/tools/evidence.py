@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
+from pydantic import BaseModel
+
 from patchproof.core.state import (
     BugEvidence,
     BugEvidenceSource,
@@ -10,6 +12,8 @@ from patchproof.core.state import (
     TestRunResult,
     TracebackFrame,
 )
+from patchproof.errors import LLMProviderError
+from patchproof.llm.base import LLMRequest
 from patchproof.tools.log_parser import LogParser
 from patchproof.tools.traceback_parser import TracebackParser
 
@@ -39,6 +43,47 @@ class LogFileEvidenceReader:
             raw_text=path.read_text(encoding="utf-8"),
         )
         object.__setattr__(source, "path", path)
+        return source
+
+
+class ExtractedImageText(BaseModel):
+    extracted_text: str
+
+
+class VisionTextExtractor:
+    def __init__(self, llm) -> None:
+        self._llm = llm
+
+    def extract(self, image_path: Path) -> BugEvidenceSource:
+        image_method = getattr(self._llm, "generate_structured_with_image", None)
+        if not getattr(self._llm, "supports_images", False) or image_method is None:
+            raise LLMProviderError(
+                "Configured LLM provider does not support image input. "
+                "Use --bug-text or --bug-log to provide visible error text."
+            )
+
+        response = image_method(
+            LLMRequest(
+                system_prompt=(
+                    "Extract only visible bug evidence text from the screenshot. "
+                    "Return no interpretation or summary."
+                ),
+                user_prompt=(
+                    "Extract only visible error text, tracebacks, file paths, line numbers, "
+                    "and log messages from this image."
+                ),
+            ),
+            image_path,
+            ExtractedImageText,
+        )
+        extracted_text = response.data.extracted_text
+        source = BugEvidenceSource(
+            source_type=EvidenceSourceType.BUG_IMAGE,
+            label=str(image_path),
+            raw_text=extracted_text,
+        )
+        object.__setattr__(source, "path", image_path)
+        object.__setattr__(source, "extracted_text", extracted_text)
         return source
 
 

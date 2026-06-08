@@ -143,3 +143,31 @@ def test_openai_compatible_client_falls_back_when_json_schema_is_unsupported(mon
     assert response.call_count == 2
     assert payloads[0]["response_format"]["type"] == "json_schema"
     assert payloads[1]["response_format"]["type"] == "json_object"
+
+
+def test_openai_compatible_client_sends_local_image_as_data_url(tmp_path, monkeypatch):
+    payloads = []
+    image_path = tmp_path / "error.png"
+    image_path.write_bytes(b"image-bytes")
+
+    def fake_post(*args, **kwargs):
+        payloads.append(kwargs["json"])
+        return _response('{"extracted_text": "ValueError: bad"}')
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = OpenAICompatibleClient("https://api.example.com/v1", "secret", "model")
+
+    class ExtractedText(BaseModel):
+        extracted_text: str
+
+    response = client.generate_structured_with_image(
+        LLMRequest(system_prompt="system", user_prompt="extract text"),
+        image_path,
+        ExtractedText,
+    )
+
+    user_content = payloads[0]["messages"][1]["content"]
+    assert response.data.extracted_text == "ValueError: bad"
+    assert user_content[0]["type"] == "text"
+    assert user_content[1]["type"] == "image_url"
+    assert user_content[1]["image_url"]["url"].startswith("data:image/png;base64,")
