@@ -141,3 +141,44 @@ def test_markdown_report_includes_bug_evidence_and_verification_plan():
     assert "pytest tests/test_parser.py -q" in markdown
     assert "Skipped" in markdown
     assert "make deploy" in markdown
+
+
+def test_markdown_report_uses_placeholder_for_empty_verification_commands():
+    state = RunState(
+        project_path=Path("demo"),
+        verification_plan=VerificationPlan(
+            commands=[
+                VerificationCommand(
+                    command=[],
+                    source=VerificationCommandSource.MATCHED_TEST,
+                    reason="Matched parser.py.",
+                )
+            ],
+            skipped_commands=[
+                VerificationCommand(
+                    command=[],
+                    source=VerificationCommandSource.SKIPPED_UNSAFE,
+                    reason="Outside allowlist.",
+                )
+            ],
+        ),
+        attempts=[
+            AttemptResult(
+                patch_diff="diff --git a/src/parser.py b/src/parser.py\n",
+                verification_command=VerificationCommand(
+                    command=[],
+                    source=VerificationCommandSource.MATCHED_TEST,
+                    reason="Matched parser.py.",
+                ),
+            )
+        ],
+    )
+
+    markdown = render_markdown_report(state)
+
+    assert "- `not provided` (matched_test): Matched parser.py." in markdown
+    assert "- Skipped `not provided` (skipped_unsafe): Outside allowlist." in markdown
+    assert "- Verification command: `not provided`" in markdown
+    assert "`` (matched_test)" not in markdown
+    assert "Skipped ``" not in markdown
+    assert "Verification command: ``" not in markdown

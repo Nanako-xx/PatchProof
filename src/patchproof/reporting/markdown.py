@@ -6,7 +6,7 @@ from patchproof.core.state import RunState
 
 
 def _format_command(command: list[str]) -> str:
-    return " ".join(command)
+    return " ".join(command) if command else "not provided"
 
 
 def _format_values(values: list[str]) -> str:
