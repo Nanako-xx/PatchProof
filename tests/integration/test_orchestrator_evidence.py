@@ -3,7 +3,14 @@ from pathlib import Path
 
 from patchproof.core.config import Settings
 from patchproof.core.orchestrator import WorkflowOrchestrator
-from patchproof.core.state import FinalStatus, VerificationCommandSource, VerificationStatus
+from patchproof.core.state import (
+    EvidenceSourceType,
+    FinalStatus,
+    TestRunResult,
+    TestRunStatus,
+    VerificationCommandSource,
+    VerificationStatus,
+)
 from patchproof.llm.base import FakeLLMClient
 
 
@@ -163,3 +170,65 @@ def test_bug_image_flows_through_fake_vision(tmp_path: Path, monkeypatch):
     assert state.bug_evidence.sources[0].source_type.value == "bug_image"
     report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert report["bug_evidence"]["sources"][0]["source_type"] == "bug_image"
+
+
+def test_bad_command_without_other_evidence_stops_and_writes_report(tmp_path: Path, monkeypatch):
+    project = tmp_path / "parser_project"
+    write_parser_project(project)
+    monkeypatch.chdir(tmp_path)
+
+    state = WorkflowOrchestrator(Settings(), FakeLLMClient([])).run_evidence(
+        project_path=project,
+        test_command=["patchproof-command-that-does-not-exist"],
+        bug_text=None,
+        bug_log=None,
+        bug_image=None,
+    )
+
+    assert state.final_status == FinalStatus.STOPPED
+    assert state.baseline_test_result is not None
+    assert state.baseline_test_result.status == TestRunStatus.COMMAND_ERROR
+    assert state.bug_evidence is None
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert report["final_status"] == "stopped"
+    assert report["baseline_test_result"]["status"] == "command_error"
+
+
+def test_non_passed_baseline_with_usable_output_becomes_evidence(tmp_path: Path, monkeypatch):
+    project = tmp_path / "parser_project"
+    write_parser_project(project)
+    monkeypatch.chdir(tmp_path)
+
+    def fake_timeout(self, project_path, test_command):
+        traceback_text = (
+            "Traceback (most recent call last):\n"
+            "  File \"tests/test_parser.py\", line 8, in test_parse_count_returns_int\n"
+            "    assert parse_count('3') == 3\n"
+            "  File \"src/parser.py\", line 2, in parse_count\n"
+            "    return value\n"
+            "TimeoutError: timed out after partial test output\n"
+        )
+        return TestRunResult(
+            status=TestRunStatus.TIMEOUT,
+            command=test_command,
+            exit_code=None,
+            stdout=traceback_text,
+            stderr="",
+            traceback_text=traceback_text,
+            summary="TimeoutError: timed out after partial test output",
+        )
+
+    monkeypatch.setattr(WorkflowOrchestrator, "_run_tests", fake_timeout)
+
+    state = WorkflowOrchestrator(Settings(), fake_llm_with_patch()).run_evidence(
+        project_path=project,
+        test_command=["pytest", "-q"],
+        bug_text=None,
+        bug_log=None,
+        bug_image=None,
+    )
+
+    assert state.bug_evidence is not None
+    assert state.bug_evidence.sources[0].source_type == EvidenceSourceType.TEST_OUTPUT
+    assert state.baseline_test_result is not None
+    assert state.baseline_test_result.status == TestRunStatus.TIMEOUT

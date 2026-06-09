@@ -67,7 +67,7 @@ class WorkflowOrchestrator:
             baseline = self._run_tests(project_path, test_command)
             state.baseline_test_result = baseline
             state.traceback_summary = TracebackParser().parse(baseline.stdout + "\n" + baseline.stderr)
-            if baseline.status == TestRunStatus.FAILED:
+            if baseline.status != TestRunStatus.PASSED and self._has_usable_test_output(baseline):
                 sources.append(EvidenceInput.from_test_result(baseline))
         else:
             baseline = None
@@ -226,10 +226,21 @@ Stderr:
 Return a corrected complete replacement patch against the original code."""
 
     def _run_tests(self, project_path: Path, test_command: list[str]) -> TestRunResult:
-        result = CommandRunner(timeout_seconds=self.settings.command_timeout_seconds).run(
-            test_command,
-            cwd=project_path,
-        )
+        try:
+            result = CommandRunner(timeout_seconds=self.settings.command_timeout_seconds).run(
+                test_command,
+                cwd=project_path,
+            )
+        except OSError as exc:
+            message = str(exc)
+            return TestRunResult(
+                status=TestRunStatus.COMMAND_ERROR,
+                command=test_command,
+                exit_code=None,
+                stderr=message,
+                traceback_text=message,
+                summary=message,
+            )
         combined_output = result.stdout + "\n" + result.stderr
         if result.timed_out:
             status = TestRunStatus.TIMEOUT
@@ -249,6 +260,11 @@ Return a corrected complete replacement patch against the original code."""
             traceback_text=combined_output,
             summary=self._extract_summary(combined_output),
         )
+
+    def _has_usable_test_output(self, result: TestRunResult) -> bool:
+        if result.status == TestRunStatus.COMMAND_ERROR and not result.stdout.strip():
+            return False
+        return bool((result.stdout or result.stderr or result.traceback_text).strip())
 
     def _extract_failed_tests(self, output: str) -> list[str]:
         failed_tests: list[str] = []
