@@ -47,6 +47,41 @@ def test_planner_uses_traceback_test_entrypoint(tmp_path: Path):
     assert plan.commands[0].source == VerificationCommandSource.TRACEBACK_ENTRYPOINT
 
 
+def test_planner_normalizes_absolute_traceback_entrypoint(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    test_path = tmp_path / "tests" / "test_parser.py"
+    test_path.write_text("def test_parse(): pass\n", encoding="utf-8")
+    evidence = BugEvidence(entrypoint_files=[str(test_path)])
+
+    plan = VerificationPlanner().plan(tmp_path, evidence, changed_files=[], user_test_command=[])
+
+    assert plan.commands[0].command == ["pytest", "tests/test_parser.py", "-q"]
+    assert plan.commands[0].source == VerificationCommandSource.TRACEBACK_ENTRYPOINT
+
+
+def test_planner_uses_all_traceback_test_entrypoints_in_deterministic_order(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    first_test = tmp_path / "tests" / "test_alpha.py"
+    second_test = tmp_path / "tests" / "test_beta.py"
+    first_test.write_text("def test_alpha(): pass\n", encoding="utf-8")
+    second_test.write_text("def test_beta(): pass\n", encoding="utf-8")
+    evidence = BugEvidence(
+        entrypoint_files=[
+            "tests/test_beta.py",
+            "tests/test_alpha.py",
+            str(first_test),
+        ]
+    )
+
+    plan = VerificationPlanner().plan(tmp_path, evidence, changed_files=[], user_test_command=[])
+
+    assert [command.command for command in plan.commands] == [
+        ["pytest", "tests/test_alpha.py", "-q"],
+        ["pytest", "tests/test_beta.py", "-q"],
+    ]
+    assert all(command.source == VerificationCommandSource.TRACEBACK_ENTRYPOINT for command in plan.commands)
+
+
 def test_planner_matches_source_file_to_test_file(tmp_path: Path):
     (tmp_path / "src").mkdir()
     (tmp_path / "tests" / "unit").mkdir(parents=True)
