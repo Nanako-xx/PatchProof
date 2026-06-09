@@ -112,7 +112,7 @@ def test_orchestrator_returns_failed_verification_to_investigator(tmp_path: Path
     assert len(state.attempts) == 2
     assert state.attempts[0].verification_status == VerificationStatus.TESTS_FAILED
     assert state.attempts[0].verification_result is not None
-    investigation_prompts = [call.user_prompt for call in fake_llm.calls if call.user_prompt.startswith("Baseline:")]
+    investigation_prompts = [call.user_prompt for call in fake_llm.calls if call.user_prompt.startswith("Bug evidence:")]
     assert state.attempts[0].verification_result.summary in investigation_prompts[2]
 
 

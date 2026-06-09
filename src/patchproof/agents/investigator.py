@@ -5,7 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from patchproof.core.config import Settings
-from patchproof.core.state import Hypothesis, InvestigationResult, TestRunResult, ToolTraceEntry
+from patchproof.core.state import BugEvidence, Hypothesis, InvestigationResult, TestRunResult, ToolTraceEntry
 from patchproof.llm.base import LLMClient, LLMRequest
 from patchproof.tools.code_context import CodeContextTool
 from patchproof.tools.project_indexer import ProjectIndexer
@@ -83,10 +83,12 @@ class InvestigatorAgent:
         self.settings = settings
 
     def run(self, baseline: TestRunResult, repository_context: str) -> InvestigationResult:
-        user_prompt = f"""Baseline failed tests: {baseline.failed_tests}
-Summary: {baseline.summary}
-Stdout: {baseline.stdout}
-Traceback: {baseline.traceback_text}
+        evidence = BugEvidence(raw_text=baseline.traceback_text, summary=baseline.summary)
+        return self.run_with_evidence(evidence, repository_context)
+
+    def run_with_evidence(self, evidence: BugEvidence, repository_context: str) -> InvestigationResult:
+        user_prompt = f"""Bug evidence:
+{evidence.model_dump()}
 Repository context:
 {repository_context}
 Max hypotheses: {self.settings.max_hypotheses}
@@ -103,10 +105,20 @@ Max hypotheses: {self.settings.max_hypotheses}
         indexer: ProjectIndexer,
         context_tool: CodeContextTool,
     ) -> InvestigationResult:
+        evidence = BugEvidence(raw_text=baseline.traceback_text, summary=baseline.summary)
+        return self.run_with_evidence_and_tools(evidence, indexer, context_tool)
+
+    def run_with_evidence_and_tools(
+        self,
+        evidence: BugEvidence,
+        indexer: ProjectIndexer,
+        context_tool: CodeContextTool,
+    ) -> InvestigationResult:
         observations: list[str] = []
         trace: list[ToolTraceEntry] = []
         for _ in range(self.settings.max_investigation_tool_calls + 1):
-            prompt = f"""Baseline: {baseline.model_dump()}
+            prompt = f"""Bug evidence:
+{evidence.model_dump()}
 Observations:
 {chr(10).join(observations)}
 
@@ -141,7 +153,7 @@ Observations:
                 )
             )
 
-        return self.run(baseline, "\n".join(observations))
+        return self.run_with_evidence(evidence, "\n".join(observations))
 
     def _execute_read_only_action(
         self,

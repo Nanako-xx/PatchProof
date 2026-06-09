@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from patchproof.core.state import AttemptResult, InvestigationResult, TestRunResult
+from patchproof.core.state import AttemptResult, BugEvidence, InvestigationResult, TestRunResult
 from patchproof.llm.base import LLMClient, LLMRequest
 
 
@@ -30,9 +30,20 @@ class PatchAgent:
         previous_patch: str = "",
         feedback: str = "",
     ) -> AttemptResult:
+        evidence = BugEvidence(raw_text=baseline.traceback_text, summary=baseline.summary)
+        return self.run_with_evidence(investigation, evidence, code_context, previous_patch, feedback)
+
+    def run_with_evidence(
+        self,
+        investigation: InvestigationResult,
+        evidence: BugEvidence,
+        code_context: str,
+        previous_patch: str = "",
+        feedback: str = "",
+    ) -> AttemptResult:
         user_prompt = f"""Investigation: {investigation.model_dump()}
-Baseline summary: {baseline.summary}
-Failed tests: {baseline.failed_tests}
+Bug evidence:
+{evidence.model_dump()}
 Code context:
 {code_context}
 Previous patch:
