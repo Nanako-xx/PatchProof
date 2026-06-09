@@ -82,6 +82,36 @@ def test_planner_uses_all_traceback_test_entrypoints_in_deterministic_order(tmp_
     assert all(command.source == VerificationCommandSource.TRACEBACK_ENTRYPOINT for command in plan.commands)
 
 
+def test_planner_skips_relative_traceback_entrypoint_outside_project(tmp_path: Path):
+    outside_dir = tmp_path.parent / "outside"
+    outside_dir.mkdir()
+    outside_test = outside_dir / "test_escape.py"
+    outside_test.write_text("def test_escape(): pass\n", encoding="utf-8")
+    evidence = BugEvidence(entrypoint_files=["../outside/test_escape.py"])
+
+    plan = VerificationPlanner().plan(tmp_path, evidence, changed_files=[], user_test_command=[])
+
+    assert plan.commands == []
+
+
+def test_planner_deduplicates_normalized_traceback_entrypoints(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    test_path = tmp_path / "tests" / "test_parser.py"
+    test_path.write_text("def test_parse(): pass\n", encoding="utf-8")
+    evidence = BugEvidence(
+        entrypoint_files=[
+            "tests/test_parser.py",
+            "tests/../tests/test_parser.py",
+            str(test_path),
+        ]
+    )
+
+    plan = VerificationPlanner().plan(tmp_path, evidence, changed_files=[], user_test_command=[])
+
+    assert [command.command for command in plan.commands] == [["pytest", "tests/test_parser.py", "-q"]]
+    assert plan.commands[0].source == VerificationCommandSource.TRACEBACK_ENTRYPOINT
+
+
 def test_planner_matches_source_file_to_test_file(tmp_path: Path):
     (tmp_path / "src").mkdir()
     (tmp_path / "tests" / "unit").mkdir(parents=True)

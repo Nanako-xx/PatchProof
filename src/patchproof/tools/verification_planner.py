@@ -64,13 +64,14 @@ class VerificationPlanner:
     ) -> List[VerificationCommand]:
         matched_paths: List[Path] = []
         seen_paths = set()
+        project_root = project_path.resolve()
 
         for entrypoint in entrypoint_files:
-            relative_path = self._project_relative_path(project_path, entrypoint)
+            relative_path = self._project_relative_path(project_root, entrypoint)
             if relative_path is None:
                 continue
 
-            path = project_path / relative_path
+            path = project_root / relative_path
             if not path.is_file() or not self._is_test_like_file(path):
                 continue
 
@@ -147,13 +148,15 @@ class VerificationPlanner:
             stems.append(stem)
         return sorted(stems)
 
-    def _project_relative_path(self, project_path: Path, path_text: str) -> Optional[Path]:
+    def _project_relative_path(self, project_root: Path, path_text: str) -> Optional[Path]:
         path = Path(path_text)
-        if not path.is_absolute():
-            return path
+        if path.is_absolute():
+            resolved_path = path.resolve()
+        else:
+            resolved_path = (project_root / path).resolve()
 
         try:
-            return path.resolve().relative_to(project_path.resolve())
+            return resolved_path.relative_to(project_root)
         except ValueError:
             return None
 
