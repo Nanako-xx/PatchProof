@@ -81,6 +81,8 @@ def test_investigator_returns_structured_hypothesis():
 
     assert result.selected_hypothesis.description.startswith("add uses")
     assert "Max hypotheses: 3" in client.calls[0].user_prompt
+    assert "test_calculator.py::test_add" in client.calls[0].user_prompt
+    assert "assert -1 == 5" in client.calls[0].user_prompt
 
 
 def test_investigator_prompt_includes_bug_evidence(sample_bug_evidence: BugEvidence):
@@ -126,6 +128,8 @@ def test_patch_agent_returns_diff():
 
     assert result.patch_diff.startswith("diff --git")
     assert result.patch_explanation == "Use addition."
+    assert "test_calculator.py::test_add" in client.calls[0].user_prompt
+    assert "assert -1 == 5" in client.calls[0].user_prompt
 
 
 def test_patch_agent_prompt_includes_bug_evidence(sample_bug_evidence: BugEvidence):
