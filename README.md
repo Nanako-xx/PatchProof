@@ -52,16 +52,16 @@ image -> vision text extraction -> traceback/log parsing -> BugEvidence
 
 When `--test` is provided, PatchProof uses it as the most trusted verification command.
 
-When `--test` is not provided, PatchProof only runs restricted Python verification commands:
+User-provided `--test` commands are validated separately before execution.
+
+When `--test` is not provided, PatchProof currently auto-selects restricted pytest verification commands:
 
 ```text
-pytest <test-file-or-dir> -q
-python -m pytest <test-file-or-dir> -q
-python -m unittest
-python -m unittest discover
+pytest <matched-or-evidence-referenced-test-file> -q
+pytest -q
 ```
 
-PatchProof v0.2 does not automatically execute `make`, `npm run`, deployment commands, install commands, migrations, network commands, or arbitrary shell commands. Those may be recorded as skipped candidates in the report, but they are not run.
+PatchProof v0.2 does not automatically execute `make`, `npm run`, deployment commands, install commands, migrations, network commands, or arbitrary shell commands. They are not run.
 
 Reports distinguish `verified`, `not_reproduced`, `unverified`, and `stopped`.
 
