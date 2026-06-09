@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from patchproof.agents.coach import CoachExplainer
 from patchproof.agents.investigator import InvestigatorAgent
@@ -22,10 +23,18 @@ from patchproof.reporting.markdown import write_markdown_report
 from patchproof.tools.code_context import CodeContextTool
 from patchproof.tools.command_runner import CommandRunner
 from patchproof.tools.diff_parser import DiffParser
+from patchproof.tools.evidence import (
+    BugEvidenceBuilder,
+    EvidenceInput,
+    LogFileEvidenceReader,
+    TextEvidenceReader,
+    VisionTextExtractor,
+)
 from patchproof.tools.patch_applier import PatchApplier
 from patchproof.tools.project_indexer import ProjectIndexer
 from patchproof.tools.temp_workspace import TempWorkspace
 from patchproof.tools.traceback_parser import TracebackParser
+from patchproof.tools.verification_planner import VerificationPlanner
 
 
 class WorkflowOrchestrator:
@@ -34,36 +43,76 @@ class WorkflowOrchestrator:
         self.llm = llm
 
     def run(self, project_path: Path, test_command: list[str]) -> RunState:
-        state = RunState(project_path=project_path, test_command=test_command)
-        baseline = self._run_tests(project_path, test_command)
-        state.baseline_test_result = baseline
-        state.traceback_summary = TracebackParser().parse(baseline.stdout + "\n" + baseline.stderr)
+        return self.run_evidence(
+            project_path=project_path,
+            test_command=test_command,
+            bug_text=None,
+            bug_log=None,
+            bug_image=None,
+        )
 
-        if baseline.status == TestRunStatus.PASSED:
+    def run_evidence(
+        self,
+        project_path: Path,
+        test_command: list[str],
+        bug_text: Optional[str],
+        bug_log: Optional[Path],
+        bug_image: Optional[Path],
+    ) -> RunState:
+        state = RunState(project_path=project_path, test_command=test_command)
+        sources = []
+        non_test_source_count = 0
+
+        if test_command:
+            baseline = self._run_tests(project_path, test_command)
+            state.baseline_test_result = baseline
+            state.traceback_summary = TracebackParser().parse(baseline.stdout + "\n" + baseline.stderr)
+            if baseline.status == TestRunStatus.FAILED:
+                sources.append(EvidenceInput.from_test_result(baseline))
+        else:
+            baseline = None
+
+        if bug_text:
+            sources.append(TextEvidenceReader().read("pasted bug text", bug_text))
+            non_test_source_count += 1
+        if bug_log is not None:
+            sources.append(LogFileEvidenceReader().read(bug_log))
+            non_test_source_count += 1
+        if bug_image is not None:
+            sources.append(VisionTextExtractor(self.llm).extract(bug_image))
+            non_test_source_count += 1
+
+        if baseline is not None and baseline.status == TestRunStatus.PASSED and non_test_source_count == 0:
             state.final_status = FinalStatus.NOT_REPRODUCED
             state.stop_reason = "Baseline tests passed; failure was not reproduced."
             return self._write_reports(state)
-        if baseline.status in {TestRunStatus.COMMAND_ERROR, TestRunStatus.TIMEOUT}:
+        if not sources:
             state.final_status = FinalStatus.STOPPED
-            state.stop_reason = "Baseline test command failed before a reproducible pytest failure was available."
+            if baseline is not None and baseline.status in {TestRunStatus.COMMAND_ERROR, TestRunStatus.TIMEOUT}:
+                state.stop_reason = "Baseline test command failed before usable bug evidence was available."
+            else:
+                state.stop_reason = "No bug evidence available."
             return self._write_reports(state)
+
+        evidence = BugEvidenceBuilder().build(sources)
+        state.bug_evidence = evidence
+        state.traceback_summary = evidence.traceback_summary
 
         indexer = ProjectIndexer(project_path)
         context_tool = CodeContextTool(project_path)
-        investigation = InvestigatorAgent(self.llm, self.settings).run_with_tools(
-            baseline=baseline,
+        investigation = InvestigatorAgent(self.llm, self.settings).run_with_evidence_and_tools(
+            evidence=evidence,
             indexer=indexer,
             context_tool=context_tool,
         )
         state.investigation = investigation
 
         repository_context = self._build_repository_context(project_path)
-        evidence = baseline
         previous_patch = ""
         feedback = ""
 
         for attempt_number in range(1, self.settings.max_patch_attempts + 1):
-            attempt = PatchAgent(self.llm).run(
+            attempt = PatchAgent(self.llm).run_with_evidence(
                 investigation,
                 evidence,
                 repository_context,
@@ -93,14 +142,34 @@ class WorkflowOrchestrator:
                     feedback = self._patch_apply_feedback(attempt)
                     continue
 
-                verification = self._run_tests(copied_project, test_command)
+                changed_files = attempt.diff_metadata.changed_files if attempt.diff_metadata else []
+                plan = VerificationPlanner().plan(
+                    copied_project,
+                    evidence,
+                    changed_files=changed_files,
+                    user_test_command=test_command,
+                )
+                state.verification_plan = plan
+                if not plan.commands:
+                    attempt.verification_status = VerificationStatus.NOT_RUN
+                    state.attempts.append(attempt)
+                    state.final_status = FinalStatus.UNVERIFIED
+                    state.stop_reason = "No allowed behavioral verification command was available."
+                    break
+
+                command = plan.commands[0]
+                attempt.verification_command = command
+                verification = self._run_tests(copied_project, command.command)
                 attempt.verification_result = verification
 
             state.attempts.append(attempt)
             if verification.status == TestRunStatus.PASSED:
                 attempt.verification_status = VerificationStatus.VERIFIED
                 state.final_status = FinalStatus.VERIFIED
-                state.stop_reason = "Patch verified against the provided test command in a temporary copy."
+                state.stop_reason = (
+                    "Patch verified in a temporary copy with command: "
+                    f"{' '.join(attempt.verification_command.command if attempt.verification_command else [])}."
+                )
                 break
             if verification.status == TestRunStatus.TIMEOUT:
                 attempt.verification_status = VerificationStatus.TIMEOUT
@@ -111,10 +180,12 @@ class WorkflowOrchestrator:
             attempt.verification_status = VerificationStatus.TESTS_FAILED
             previous_patch = attempt.patch_diff
             feedback = self._verification_feedback(attempt)
-            evidence = verification
+            sources.append(EvidenceInput.from_test_result(verification))
+            evidence = BugEvidenceBuilder().build(sources)
+            state.bug_evidence = evidence
             if attempt_number < self.settings.max_patch_attempts:
-                investigation = InvestigatorAgent(self.llm, self.settings).run_with_tools(
-                    baseline=verification,
+                investigation = InvestigatorAgent(self.llm, self.settings).run_with_evidence_and_tools(
+                    evidence=evidence,
                     indexer=indexer,
                     context_tool=context_tool,
                 )
