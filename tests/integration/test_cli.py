@@ -21,6 +21,31 @@ def test_cli_rejects_non_pytest_test_command():
     assert "Only pytest" in result.output or "Unsupported" in result.output
 
 
+def test_cli_accepts_test_only_path(monkeypatch):
+    calls = []
+
+    class FakeOrchestrator:
+        def __init__(self, settings, llm) -> None:
+            pass
+
+        def run(self, project_path, command):
+            calls.append((project_path, command))
+
+            class State:
+                final_status = type("Status", (), {"value": "unverified"})()
+
+            return State()
+
+    monkeypatch.setattr("patchproof.cli.WorkflowOrchestrator", FakeOrchestrator)
+    monkeypatch.setattr("patchproof.cli.create_llm_client", lambda settings: object())
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["run", ".", "--test", "pytest -q"])
+
+    assert result.exit_code == 0
+    assert calls[0][1] == ["pytest", "-q"]
+
+
 def test_cli_accepts_bug_text_without_test(monkeypatch):
     calls = []
 

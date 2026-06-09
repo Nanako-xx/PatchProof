@@ -34,20 +34,25 @@ def run(
     """Run PatchProof against local bug evidence."""
     load_dotenv()
     try:
-        if not any([test, bug_text, bug_log, bug_image]):
+        has_bug_evidence = any([bug_text, bug_log, bug_image])
+        if not any([test, has_bug_evidence]):
             raise CommandValidationError(
                 "Provide at least one of --test, --bug-text, --bug-log, or --bug-image."
             )
         command = parse_pytest_command(test) if test is not None else []
         settings = Settings.from_env()
         llm = create_llm_client(settings)
-        state = WorkflowOrchestrator(settings, llm).run_evidence(
-            project_path=project_path.resolve(),
-            test_command=command,
-            bug_text=bug_text,
-            bug_log=bug_log,
-            bug_image=bug_image,
-        )
+        orchestrator = WorkflowOrchestrator(settings, llm)
+        if has_bug_evidence:
+            state = orchestrator.run_evidence(
+                project_path=project_path.resolve(),
+                test_command=command,
+                bug_text=bug_text,
+                bug_log=bug_log,
+                bug_image=bug_image,
+            )
+        else:
+            state = orchestrator.run(project_path.resolve(), command)
     except (CommandValidationError, LLMProviderError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
