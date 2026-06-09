@@ -1,3 +1,5 @@
+import pytest
+
 from patchproof.agents.coach import CoachExplainer
 from patchproof.agents.investigator import InvestigatorAgent
 from patchproof.agents.patcher import PatchAgent
@@ -39,6 +41,7 @@ def investigation_result() -> InvestigationResult:
     )
 
 
+@pytest.fixture
 def sample_bug_evidence() -> BugEvidence:
     return BugEvidence(
         sources=[
@@ -80,7 +83,7 @@ def test_investigator_returns_structured_hypothesis():
     assert "Max hypotheses: 3" in client.calls[0].user_prompt
 
 
-def test_investigator_prompt_includes_bug_evidence():
+def test_investigator_prompt_includes_bug_evidence(sample_bug_evidence: BugEvidence):
     client = FakeLLMClient(
         [
             {
@@ -100,7 +103,7 @@ def test_investigator_prompt_includes_bug_evidence():
     )
 
     result = InvestigatorAgent(client, Settings()).run_with_evidence(
-        sample_bug_evidence(),
+        sample_bug_evidence,
         repository_context="parser.py",
     )
 
@@ -125,7 +128,7 @@ def test_patch_agent_returns_diff():
     assert result.patch_explanation == "Use addition."
 
 
-def test_patch_agent_prompt_includes_bug_evidence():
+def test_patch_agent_prompt_includes_bug_evidence(sample_bug_evidence: BugEvidence):
     client = FakeLLMClient(
         [
             {
@@ -137,7 +140,7 @@ def test_patch_agent_prompt_includes_bug_evidence():
 
     result = PatchAgent(client).run_with_evidence(
         investigation_result(),
-        sample_bug_evidence(),
+        sample_bug_evidence,
         code_context="def parse(value): return int(value)",
     )
 
