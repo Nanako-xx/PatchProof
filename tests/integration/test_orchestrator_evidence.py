@@ -143,6 +143,31 @@ def test_bug_log_with_user_test_uses_user_test(tmp_path: Path, monkeypatch):
     assert state.verification_plan.commands[0].source == VerificationCommandSource.USER_PROVIDED
 
 
+def test_passing_user_test_with_separate_bug_evidence_uses_matched_test(tmp_path: Path, monkeypatch):
+    project = tmp_path / "parser_project"
+    write_parser_project(project)
+    (project / "tests" / "test_unrelated.py").write_text(
+        "def test_unrelated_behavior():\n"
+        "    assert 1 + 1 == 2\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    state = WorkflowOrchestrator(Settings(), fake_llm_with_patch()).run_evidence(
+        project_path=project,
+        test_command=["pytest", "tests/test_unrelated.py", "-q"],
+        bug_text="ERROR src/parser.py:2 parse_count returns text\n",
+        bug_log=None,
+        bug_image=None,
+    )
+
+    assert state.final_status == FinalStatus.VERIFIED
+    assert state.verification_plan is not None
+    assert state.verification_plan.commands[0].command == ["pytest", "tests/test_parser.py", "-q"]
+    assert state.verification_plan.commands[0].source == VerificationCommandSource.MATCHED_TEST
+    assert state.verification_plan.commands[0].command != ["pytest", "tests/test_unrelated.py", "-q"]
+
+
 def test_bug_image_flows_through_fake_vision(tmp_path: Path, monkeypatch):
     project = tmp_path / "parser_project"
     write_parser_project(project)

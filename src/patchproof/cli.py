@@ -39,6 +39,8 @@ def run(
             raise CommandValidationError(
                 "Provide at least one of --test, --bug-text, --bug-log, or --bug-image."
             )
+        if bug_log is not None:
+            _validate_bug_log_path(bug_log)
         command = parse_pytest_command(test) if test is not None else []
         settings = Settings.from_env()
         llm = create_llm_client(settings)
@@ -59,3 +61,15 @@ def run(
 
     console.print(f"[green]PatchProof finished with status:[/green] {state.final_status.value}")
     console.print("Reports written: report.md, report.json")
+
+
+def _validate_bug_log_path(path: Path) -> None:
+    if not path.exists():
+        raise CommandValidationError(f"Bug log does not exist: {path}")
+    if not path.is_file():
+        raise CommandValidationError(f"Bug log is not a file: {path}")
+    try:
+        with path.open("r", encoding="utf-8"):
+            pass
+    except OSError as exc:
+        raise CommandValidationError(f"Bug log is not readable: {path}") from exc

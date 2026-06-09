@@ -53,7 +53,7 @@ def _append_verification_plan(lines: list[str], state: RunState) -> None:
     if plan is None:
         return
 
-    lines.extend(["", "## Verification Plan", "", "Attempted candidates:"])
+    lines.extend(["", "## Verification Plan", "", "Planned candidates:"])
     if plan.commands:
         for command in plan.commands:
             lines.append(f"- `{_format_command(command.command)}` ({command.source.value}): {command.reason}")

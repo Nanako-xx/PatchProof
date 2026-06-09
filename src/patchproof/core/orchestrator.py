@@ -62,6 +62,7 @@ class WorkflowOrchestrator:
         state = RunState(project_path=project_path, test_command=test_command)
         sources = []
         non_test_source_count = 0
+        baseline_contributed_evidence = False
 
         if test_command:
             baseline = self._run_tests(project_path, test_command)
@@ -69,6 +70,7 @@ class WorkflowOrchestrator:
             state.traceback_summary = TracebackParser().parse(baseline.stdout + "\n" + baseline.stderr)
             if baseline.status != TestRunStatus.PASSED and self._has_usable_test_output(baseline):
                 sources.append(EvidenceInput.from_test_result(baseline))
+                baseline_contributed_evidence = True
         else:
             baseline = None
 
@@ -97,6 +99,10 @@ class WorkflowOrchestrator:
         evidence = BugEvidenceBuilder().build(sources)
         state.bug_evidence = evidence
         state.traceback_summary = evidence.traceback_summary
+
+        user_test_command = test_command
+        if baseline is not None and baseline.status == TestRunStatus.PASSED and not baseline_contributed_evidence:
+            user_test_command = []
 
         indexer = ProjectIndexer(project_path)
         context_tool = CodeContextTool(project_path)
@@ -147,7 +153,7 @@ class WorkflowOrchestrator:
                     copied_project,
                     evidence,
                     changed_files=changed_files,
-                    user_test_command=test_command,
+                    user_test_command=user_test_command,
                 )
                 state.verification_plan = plan
                 if not plan.commands:

@@ -21,6 +21,17 @@ def test_cli_rejects_non_pytest_test_command():
     assert "Only pytest" in result.output or "Unsupported" in result.output
 
 
+def test_cli_rejects_missing_bug_log_with_friendly_error():
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["run", ".", "--bug-log", "missing.log"])
+
+    assert result.exit_code != 0
+    assert "bug log" in result.output.lower()
+    assert "does not exist" in result.output.lower()
+    assert "Traceback" not in result.output
+
+
 def test_cli_accepts_test_only_path(monkeypatch):
     calls = []
 

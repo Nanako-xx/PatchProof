@@ -138,6 +138,8 @@ def test_markdown_report_includes_bug_evidence_and_verification_plan():
     assert "ValueError: bad" in markdown
     assert "src/parser.py:2" in markdown
     assert "## Verification Plan" in markdown
+    assert "Planned candidates:" in markdown
+    assert "Attempted candidates:" not in markdown
     assert "pytest tests/test_parser.py -q" in markdown
     assert "Skipped" in markdown
     assert "make deploy" in markdown
