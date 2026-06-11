@@ -6,11 +6,12 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
+
 class FinalStatus(str, Enum):
     CREATED = "created"
     NOT_REPRODUCED = "not_reproduced"
     STOPPED = "stopped"
-    VERIFIED = "verified_against_provided_test_command"
+    VERIFIED = "verified"
     UNVERIFIED = "unverified"
 
 
@@ -34,6 +35,22 @@ class VerificationStatus(str, Enum):
     TIMEOUT = "timeout"
 
 
+class EvidenceSourceType(str, Enum):
+    TEST_OUTPUT = "test_output"
+    BUG_TEXT = "bug_text"
+    BUG_LOG = "bug_log"
+    BUG_IMAGE = "bug_image"
+
+
+class VerificationCommandSource(str, Enum):
+    USER_PROVIDED = "user_provided"
+    TRACEBACK_ENTRYPOINT = "traceback_entrypoint"
+    MATCHED_TEST = "matched_test"
+    DEFAULT_PYTEST = "default_pytest"
+    DEFAULT_UNITTEST = "default_unittest"
+    SKIPPED_UNSAFE = "skipped_unsafe"
+
+
 class TestRunResult(BaseModel):
     status: TestRunStatus
     command: list[str]
@@ -55,6 +72,41 @@ class TracebackFrame(BaseModel):
 class TracebackSummary(BaseModel):
     exception_type: Optional[str] = None
     frames: list[TracebackFrame] = Field(default_factory=list)
+
+
+class BugEvidenceSource(BaseModel):
+    source_type: EvidenceSourceType
+    label: str = ""
+    raw_text: str = ""
+    file_path: Optional[str] = None
+
+
+class LogSignal(BaseModel):
+    level: str = ""
+    message: str = ""
+    file_path: Optional[str] = None
+    line_number: Optional[int] = None
+
+
+class BugEvidence(BaseModel):
+    sources: list[BugEvidenceSource] = Field(default_factory=list)
+    raw_text: str = ""
+    traceback_summary: TracebackSummary = Field(default_factory=TracebackSummary)
+    log_signals: list[LogSignal] = Field(default_factory=list)
+    suspected_files: list[str] = Field(default_factory=list)
+    entrypoint_files: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class VerificationCommand(BaseModel):
+    command: list[str] = Field(default_factory=list)
+    source: VerificationCommandSource
+    reason: str = ""
+
+
+class VerificationPlan(BaseModel):
+    commands: list[VerificationCommand] = Field(default_factory=list)
+    skipped_commands: list[VerificationCommand] = Field(default_factory=list)
 
 
 class ToolTraceEntry(BaseModel):
@@ -110,6 +162,7 @@ class AttemptResult(BaseModel):
     review_summary: str = ""
     semantic_risks: list[str] = Field(default_factory=list)
     verification_status: VerificationStatus = VerificationStatus.NOT_RUN
+    verification_command: Optional[VerificationCommand] = None
     verification_result: Optional[TestRunResult] = None
     patch_apply_error: str = ""
 
@@ -124,7 +177,9 @@ class CoachExplanation(BaseModel):
 
 class RunState(BaseModel):
     project_path: Path
-    test_command: list[str]
+    test_command: list[str] = Field(default_factory=list)
+    bug_evidence: Optional[BugEvidence] = None
+    verification_plan: Optional[VerificationPlan] = None
     baseline_test_result: Optional[TestRunResult] = None
     traceback_summary: Optional[TracebackSummary] = None
     investigation: Optional[InvestigationResult] = None

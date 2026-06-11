@@ -5,12 +5,76 @@ from pathlib import Path
 from patchproof.core.state import RunState
 
 
+def _format_command(command: list[str]) -> str:
+    return " ".join(command) if command else "not provided"
+
+
+def _format_values(values: list[str]) -> str:
+    return ", ".join(values) if values else "none"
+
+
+def _append_bug_evidence(lines: list[str], state: RunState) -> None:
+    evidence = state.bug_evidence
+    if evidence is None:
+        return
+
+    lines.extend(
+        [
+            "",
+            "## Bug Evidence",
+            "",
+            f"- Summary: {evidence.summary or 'none'}",
+            f"- Suspected files: {_format_values(evidence.suspected_files)}",
+            f"- Entrypoint files: {_format_values(evidence.entrypoint_files)}",
+        ]
+    )
+
+    if evidence.sources:
+        lines.extend(["", "### Sources", ""])
+        for source in evidence.sources:
+            label = f" ({source.label})" if source.label else ""
+            lines.append(f"- {source.source_type.value}{label}")
+            extracted_text = getattr(source, "extracted_text", "")
+            if extracted_text:
+                lines.extend(["", "Extracted text:", "", "```text", extracted_text, "```"])
+            elif source.raw_text:
+                lines.extend(["", "Raw text:", "", "```text", source.raw_text, "```"])
+
+    if evidence.traceback_summary.frames:
+        lines.extend(["", "### Parsed Frames", ""])
+        for frame in evidence.traceback_summary.frames:
+            location = f"{frame.file_path}:{frame.line_number}"
+            function = f" in {frame.function_name}" if frame.function_name else ""
+            lines.append(f"- {location}{function}")
+
+
+def _append_verification_plan(lines: list[str], state: RunState) -> None:
+    plan = state.verification_plan
+    if plan is None:
+        return
+
+    lines.extend(["", "## Verification Plan", "", "Planned candidates:"])
+    if plan.commands:
+        for command in plan.commands:
+            lines.append(f"- `{_format_command(command.command)}` ({command.source.value}): {command.reason}")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "Skipped candidates:"])
+    if plan.skipped_commands:
+        for command in plan.skipped_commands:
+            lines.append(f"- Skipped `{_format_command(command.command)}` ({command.source.value}): {command.reason}")
+    else:
+        lines.append("- none")
+
+
 def render_markdown_report(state: RunState) -> str:
+    test_command = _format_command(state.test_command) if state.test_command else "not provided"
     lines = [
         "# PatchProof Report",
         "",
         f"- Project: `{state.project_path}`",
-        f"- Test command: `{' '.join(state.test_command)}`",
+        f"- Test command: `{test_command}`",
         f"- Final status: `{state.final_status.value}`",
     ]
     if state.stop_reason:
@@ -25,6 +89,7 @@ def render_markdown_report(state: RunState) -> str:
                 f"- Failed tests: {', '.join(state.baseline_test_result.failed_tests)}",
             ]
         )
+    _append_bug_evidence(lines, state)
     if state.investigation is not None:
         lines.extend(
             [
@@ -36,6 +101,7 @@ def render_markdown_report(state: RunState) -> str:
                 f"- Evidence: {state.investigation.selected_hypothesis.evidence}",
             ]
         )
+    _append_verification_plan(lines, state)
     if state.attempts:
         lines.extend(["", "## Attempts", ""])
         for index, attempt in enumerate(state.attempts, start=1):
@@ -50,6 +116,8 @@ def render_markdown_report(state: RunState) -> str:
                     f"- Review summary: {attempt.review_summary}",
                 ]
             )
+            if attempt.verification_command is not None:
+                lines.append(f"- Verification command: `{_format_command(attempt.verification_command.command)}`")
             if attempt.patch_apply_error:
                 lines.append(f"- Patch apply error: `{attempt.patch_apply_error.strip()}`")
             if attempt.verification_result is not None:

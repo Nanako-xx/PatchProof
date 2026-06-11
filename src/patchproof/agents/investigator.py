@@ -5,7 +5,15 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from patchproof.core.config import Settings
-from patchproof.core.state import Hypothesis, InvestigationResult, TestRunResult, ToolTraceEntry
+from patchproof.core.state import (
+    BugEvidence,
+    BugEvidenceSource,
+    EvidenceSourceType,
+    Hypothesis,
+    InvestigationResult,
+    TestRunResult,
+    ToolTraceEntry,
+)
 from patchproof.llm.base import LLMClient, LLMRequest
 from patchproof.tools.code_context import CodeContextTool
 from patchproof.tools.project_indexer import ProjectIndexer
@@ -26,6 +34,27 @@ Return exactly one InvestigationStep for the current turn:
 - final: suspected_files, at least one evidence-backed hypothesis with confidence,
   selected_hypothesis_index, and reasoning_summary are required.
 Do not return a final investigation result without action="final"."""
+
+
+def _bug_evidence_from_test_result(baseline: TestRunResult) -> BugEvidence:
+    parts = [
+        f"Failed tests: {baseline.failed_tests}",
+        f"Summary: {baseline.summary}",
+        f"Stdout: {baseline.stdout}",
+        f"Stderr: {baseline.stderr}",
+        f"Traceback: {baseline.traceback_text}",
+    ]
+    raw_text = "\n".join(part for part in parts if not part.endswith(": "))
+    source = BugEvidenceSource(
+        source_type=EvidenceSourceType.TEST_OUTPUT,
+        label=" ".join(baseline.command),
+        raw_text=raw_text,
+    )
+    return BugEvidence(
+        sources=[source],
+        raw_text=raw_text,
+        summary=baseline.summary,
+    )
 
 
 class InvestigationStep(BaseModel):
@@ -83,10 +112,12 @@ class InvestigatorAgent:
         self.settings = settings
 
     def run(self, baseline: TestRunResult, repository_context: str) -> InvestigationResult:
-        user_prompt = f"""Baseline failed tests: {baseline.failed_tests}
-Summary: {baseline.summary}
-Stdout: {baseline.stdout}
-Traceback: {baseline.traceback_text}
+        evidence = _bug_evidence_from_test_result(baseline)
+        return self.run_with_evidence(evidence, repository_context)
+
+    def run_with_evidence(self, evidence: BugEvidence, repository_context: str) -> InvestigationResult:
+        user_prompt = f"""Bug evidence:
+{evidence.model_dump()}
 Repository context:
 {repository_context}
 Max hypotheses: {self.settings.max_hypotheses}
@@ -103,10 +134,20 @@ Max hypotheses: {self.settings.max_hypotheses}
         indexer: ProjectIndexer,
         context_tool: CodeContextTool,
     ) -> InvestigationResult:
+        evidence = _bug_evidence_from_test_result(baseline)
+        return self.run_with_evidence_and_tools(evidence, indexer, context_tool)
+
+    def run_with_evidence_and_tools(
+        self,
+        evidence: BugEvidence,
+        indexer: ProjectIndexer,
+        context_tool: CodeContextTool,
+    ) -> InvestigationResult:
         observations: list[str] = []
         trace: list[ToolTraceEntry] = []
         for _ in range(self.settings.max_investigation_tool_calls + 1):
-            prompt = f"""Baseline: {baseline.model_dump()}
+            prompt = f"""Bug evidence:
+{evidence.model_dump()}
 Observations:
 {chr(10).join(observations)}
 
@@ -141,7 +182,7 @@ Observations:
                 )
             )
 
-        return self.run(baseline, "\n".join(observations))
+        return self.run_with_evidence(evidence, "\n".join(observations))
 
     def _execute_read_only_action(
         self,
