@@ -67,6 +67,29 @@ def parse_pytest_command(command: str) -> list[str]:
     return parts
 
 
+def parse_verification_command(command: str) -> list[str]:
+    for operator in _SHELL_OPERATORS:
+        if operator in command:
+            raise CommandValidationError(f"Shell operator is not allowed: {operator}")
+
+    parts = shlex.split(command)
+    if not parts:
+        raise CommandValidationError("Verification command cannot be empty.")
+
+    if parts[0] == "pytest":
+        parse_pytest_command(command)
+        return parts
+
+    if len(parts) >= 3 and parts[0] == "python" and parts[1] == "-m" and parts[2] == "pytest":
+        parse_pytest_command(command)
+        return parts
+
+    if parts == ["python", "-m", "unittest"] or parts == ["python", "-m", "unittest", "discover"]:
+        return parts
+
+    raise CommandValidationError("Only pytest, python -m pytest, and python -m unittest commands are allowed.")
+
+
 class CommandRunner:
     def __init__(self, timeout_seconds: int) -> None:
         self.timeout_seconds = timeout_seconds

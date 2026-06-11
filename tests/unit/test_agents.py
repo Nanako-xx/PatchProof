@@ -1,15 +1,21 @@
+import pytest
+
 from patchproof.agents.coach import CoachExplainer
 from patchproof.agents.investigator import InvestigatorAgent
 from patchproof.agents.patcher import PatchAgent
 from patchproof.agents.reviewer import ReviewerAgent
 from patchproof.core.config import Settings
 from patchproof.core.state import (
+    BugEvidence,
+    BugEvidenceSource,
     DiffMetadata,
+    EvidenceSourceType,
     Hypothesis,
     InvestigationResult,
     ReviewDecision,
     TestRunResult as RunResultModel,
     TestRunStatus as RunStatus,
+    TracebackSummary,
 )
 from patchproof.llm.base import FakeLLMClient
 
@@ -32,6 +38,23 @@ def investigation_result() -> InvestigationResult:
         suspected_files=["calculator.py"],
         hypotheses=[Hypothesis(description="bad operator", evidence="assertion", confidence=0.9)],
         selected_hypothesis_index=0,
+    )
+
+
+@pytest.fixture
+def sample_bug_evidence() -> BugEvidence:
+    return BugEvidence(
+        sources=[
+            BugEvidenceSource(
+                source_type=EvidenceSourceType.BUG_TEXT,
+                label="pasted",
+                raw_text="ValueError: bad",
+            )
+        ],
+        raw_text="ValueError: bad",
+        traceback_summary=TracebackSummary(exception_type="ValueError"),
+        suspected_files=["parser.py"],
+        summary="ValueError in parser.py",
     )
 
 
@@ -58,6 +81,37 @@ def test_investigator_returns_structured_hypothesis():
 
     assert result.selected_hypothesis.description.startswith("add uses")
     assert "Max hypotheses: 3" in client.calls[0].user_prompt
+    assert "test_calculator.py::test_add" in client.calls[0].user_prompt
+    assert "assert -1 == 5" in client.calls[0].user_prompt
+
+
+def test_investigator_prompt_includes_bug_evidence(sample_bug_evidence: BugEvidence):
+    client = FakeLLMClient(
+        [
+            {
+                "suspected_files": ["parser.py"],
+                "hypotheses": [
+                    {
+                        "description": "parser rejects a valid input",
+                        "evidence": "BugEvidence says ValueError in parser.py",
+                        "confidence": 0.8,
+                    }
+                ],
+                "selected_hypothesis_index": 0,
+                "reasoning_summary": "Evidence points to parser.py.",
+                "tool_trace": [],
+            }
+        ]
+    )
+
+    result = InvestigatorAgent(client, Settings()).run_with_evidence(
+        sample_bug_evidence,
+        repository_context="parser.py",
+    )
+
+    assert result.suspected_files == ["parser.py"]
+    assert "Bug evidence:" in client.calls[0].user_prompt
+    assert "ValueError in parser.py" in client.calls[0].user_prompt
 
 
 def test_patch_agent_returns_diff():
@@ -74,6 +128,29 @@ def test_patch_agent_returns_diff():
 
     assert result.patch_diff.startswith("diff --git")
     assert result.patch_explanation == "Use addition."
+    assert "test_calculator.py::test_add" in client.calls[0].user_prompt
+    assert "assert -1 == 5" in client.calls[0].user_prompt
+
+
+def test_patch_agent_prompt_includes_bug_evidence(sample_bug_evidence: BugEvidence):
+    client = FakeLLMClient(
+        [
+            {
+                "unified_diff": "diff --git a/parser.py b/parser.py\n",
+                "explanation": "Handle invalid values.",
+            }
+        ]
+    )
+
+    result = PatchAgent(client).run_with_evidence(
+        investigation_result(),
+        sample_bug_evidence,
+        code_context="def parse(value): return int(value)",
+    )
+
+    assert result.patch_diff.startswith("diff --git")
+    assert "Bug evidence:" in client.calls[0].user_prompt
+    assert "ValueError in parser.py" in client.calls[0].user_prompt
 
 
 def test_reviewer_rejects_rule_violations_without_llm():

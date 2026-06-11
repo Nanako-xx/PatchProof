@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -19,6 +22,10 @@ class OpenAICompatibleClient:
         self._json_schema_supported: Optional[bool] = None
         self.call_trace: list[LLMCallTrace] = []
 
+    @property
+    def supports_images(self) -> bool:
+        return True
+
     def generate_structured(self, request: LLMRequest, response_model: type[T]) -> LLMResponse:
         schema = response_model.model_json_schema()
         schema_text = json.dumps(schema, indent=2, ensure_ascii=False)
@@ -34,6 +41,22 @@ class OpenAICompatibleClient:
             },
             {"role": "user", "content": request.user_prompt},
         ]
+        return self._generate_structured_from_messages(
+            messages=messages,
+            request=request,
+            response_model=response_model,
+            schema=schema,
+            error_prefix="LLM provider call failed",
+        )
+
+    def _generate_structured_from_messages(
+        self,
+        messages: list[dict],
+        request: LLMRequest,
+        response_model: type[T],
+        schema: dict,
+        error_prefix: str,
+    ) -> LLMResponse:
         call_count = 0
         raw_responses: list[str] = []
         repair_records: list[LLMRepairRecord] = []
@@ -98,11 +121,46 @@ class OpenAICompatibleClient:
         except LLMProviderError:
             raise
         except Exception as exc:
-            raise LLMProviderError(f"LLM provider call failed: {exc}") from exc
+            raise LLMProviderError(f"{error_prefix}: {exc}") from exc
+
+    def generate_structured_with_image(
+        self,
+        request: LLMRequest,
+        image_path: Path,
+        response_model: type[T],
+    ) -> LLMResponse:
+        schema = response_model.model_json_schema()
+        schema_text = json.dumps(schema, indent=2, ensure_ascii=False)
+        data_url = self._image_data_url(image_path)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{request.system_prompt}\n\n"
+                    "Return exactly one JSON object with no Markdown fences or extra text. "
+                    "The object must validate against this JSON Schema:\n"
+                    f"{schema_text}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": request.user_prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+        return self._generate_structured_from_messages(
+            messages=messages,
+            request=request,
+            response_model=response_model,
+            schema=schema,
+            error_prefix="LLM provider image call failed",
+        )
 
     def _request_content(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict],
         temperature: float,
         response_model: type[T],
         schema: dict,
@@ -153,3 +211,15 @@ class OpenAICompatibleClient:
             return body["choices"][0]["message"]["content"], call_count
 
         raise LLMProviderError("LLM provider rejected all supported structured output formats.")
+
+    def _image_data_url(self, image_path: Path) -> str:
+        mime_type = mimetypes.guess_type(str(image_path))[0]
+        if mime_type == "image/jpg":
+            mime_type = "image/jpeg"
+        if mime_type not in {"image/png", "image/jpeg"}:
+            raise LLMProviderError(
+                "Unsupported image type for bug screenshot. "
+                "Use a PNG or JPEG image, or provide text with --bug-text or --bug-log."
+            )
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"

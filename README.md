@@ -30,6 +30,41 @@ Run PatchProof against a local pytest project:
 patchproof run ./examples/buggy_calculator --test "pytest -q"
 ```
 
+## v0.2 Evidence Inputs
+
+PatchProof can now start from several forms of bug evidence:
+
+```powershell
+patchproof run ./project --test "pytest -q"
+patchproof run ./project --bug-text "Traceback ..."
+patchproof run ./project --bug-log .\error.log
+patchproof run ./project --bug-image .\error.png
+patchproof run ./project --bug-log .\error.log --test "pytest -q"
+```
+
+All text-like inputs go through deterministic traceback/log parsing before agent reasoning. Screenshot input is handled as:
+
+```text
+image -> vision text extraction -> traceback/log parsing -> BugEvidence
+```
+
+## Verification Boundaries
+
+When `--test` is provided, PatchProof uses it as the most trusted verification command.
+
+User-provided `--test` commands are validated separately before execution.
+
+When `--test` is not provided, PatchProof currently auto-selects restricted pytest verification commands:
+
+```text
+pytest <matched-or-evidence-referenced-test-file> -q
+pytest -q
+```
+
+PatchProof v0.2 does not automatically execute `make`, `npm run`, deployment commands, install commands, migrations, network commands, or arbitrary shell commands. They are not run.
+
+Reports distinguish `verified`, `not_reproduced`, `unverified`, and `stopped`.
+
 PatchProof writes `report.md` and `report.json` in the current working directory.
 
 ## Local Verification

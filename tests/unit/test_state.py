@@ -5,13 +5,22 @@ from pydantic import ValidationError
 
 from patchproof.core.state import (
     AttemptResult,
+    BugEvidence,
+    BugEvidenceSource,
+    EvidenceSourceType,
     FinalStatus,
     Hypothesis,
     InvestigationResult,
+    LogSignal,
     ReviewDecision,
     RunState,
     TestRunResult as RunResultModel,
     TestRunStatus as RunStatus,
+    TracebackFrame,
+    TracebackSummary,
+    VerificationCommand,
+    VerificationCommandSource,
+    VerificationPlan,
     VerificationStatus,
 )
 
@@ -94,3 +103,58 @@ def test_test_run_result_has_status_and_output():
 
     assert result.status == RunStatus.FAILED
     assert result.failed_tests == ["test_calculator.py::test_add"]
+
+
+def test_bug_evidence_records_sources_and_file_hints():
+    evidence = BugEvidence(
+        sources=[
+            BugEvidenceSource(
+                source_type=EvidenceSourceType.BUG_TEXT,
+                label="pasted error",
+                raw_text='File "app.py", line 3, in handler\nValueError: bad',
+            )
+        ],
+        raw_text='File "app.py", line 3, in handler\nValueError: bad',
+        traceback_summary=TracebackSummary(
+            exception_type="ValueError",
+            frames=[TracebackFrame(file_path="app.py", line_number=3, function_name="handler")],
+        ),
+        log_signals=[LogSignal(level="ERROR", message="ValueError: bad", file_path="app.py", line_number=3)],
+        suspected_files=["app.py"],
+        entrypoint_files=[],
+        summary="ValueError in app.py",
+    )
+
+    assert evidence.sources[0].source_type == EvidenceSourceType.BUG_TEXT
+    assert evidence.traceback_summary.exception_type == "ValueError"
+    assert evidence.suspected_files == ["app.py"]
+
+
+def test_run_state_allows_evidence_without_test_command():
+    state = RunState(project_path=Path("demo"))
+
+    assert state.test_command == []
+    assert state.bug_evidence is None
+    assert state.verification_plan is None
+
+
+def test_verification_plan_records_attempted_and_skipped_commands():
+    plan = VerificationPlan(
+        commands=[
+            VerificationCommand(
+                command=["pytest", "tests/test_parser.py", "-q"],
+                source=VerificationCommandSource.MATCHED_TEST,
+                reason="Matched src/parser.py to tests/test_parser.py.",
+            )
+        ],
+        skipped_commands=[
+            VerificationCommand(
+                command=["make", "deploy"],
+                source=VerificationCommandSource.SKIPPED_UNSAFE,
+                reason="Outside the v0.2 allowlist.",
+            )
+        ],
+    )
+
+    assert plan.commands[0].command == ["pytest", "tests/test_parser.py", "-q"]
+    assert plan.skipped_commands[0].source == VerificationCommandSource.SKIPPED_UNSAFE
